@@ -13,7 +13,7 @@ struct
   open Creds
   open Http_method
 
-  module Util = Aws_util
+  module Util = Aws_util.Aws_utils(HC)
 
   exception Error of string
 
@@ -170,11 +170,15 @@ struct
            None -> []
          | Some t -> [ "NextToken", t ]) in
     
-    try_lwt 
-       lwt header, body = HC.post ~body:(`String (Util.encode_post_url params)) url in
-       let xml = X.xml_of_string body in
-       return (`Ok (list_domains_response_of_xml xml))
-    with HC.Http_error (code, _, body) ->  return (error_msg code body)
+    HC.try_bind
+      (fun () ->
+        HC.post ~body:(`String (Util.encode_post_url params)) url)
+      (fun (header,body) ->
+         let xml = X.xml_of_string body in
+         HC.return (`Ok (list_domains_response_of_xml xml)))
+      (function
+       | HC.Http_error (code, _, body) ->  HC.return (error_msg code body)
+       | e -> raise e)
 
   (* create domain *)
 
@@ -184,11 +188,15 @@ struct
       "DomainName", name
     ] in
     
-    try_lwt 
-      lwt header, body = HC.post ~body:(`String (Util.encode_post_url params)) url in
-      return `Ok
-    with HC.Http_error (code, _, body) -> 
-      return (error_msg code body)
+    HC.try_bind
+      (fun () -> 
+        HC.post ~body:(`String (Util.encode_post_url params)) url)
+      (fun (header,body) -> HC.return `Ok)
+      (function 
+        | HC.Http_error (code, _, body) -> 
+          HC.return (error_msg code body)
+        | e -> raise e)
+
 
   (* delete domain *)
 
@@ -198,11 +206,15 @@ struct
       "DomainName", name
     ] in
     
-    try_lwt 
-       lwt header, body = HC.post ~body:(`String (Util.encode_post_url params)) url in
-       return `Ok
-    with HC.Http_error (code, _, body) ->  
-      return (error_msg code body)
+    HC.try_bind
+      (fun () -> 
+         HC.post ~body:(`String (Util.encode_post_url params)) url)
+      (fun (header,body) -> HC.return `Ok)
+      (function 
+         | HC.Http_error (code, _, body) ->  
+            HC.return (error_msg code body)
+         | e -> raise e)
+
 
   (* put attributes *)
   
@@ -230,11 +242,13 @@ struct
        :: ("DomainName", domain)
        :: ("ItemName", b64enc_if encode item)
        :: attrs') in 
-    try_lwt 
-      lwt header, body = HC.post ~body:(`String (Util.encode_post_url params)) url in
-      
-      return `Ok
-    with HC.Http_error (code, _, body) -> return (error_msg code body)
+    HC.try_bind
+      (fun () -> 
+        HC.post ~body:(`String (Util.encode_post_url params)) url)
+      (fun _ -> HC.return `Ok)
+      (function
+        | HC.Http_error (code, _, body) -> HC.return (error_msg code body)
+        | e -> raise e)
 
   (* batch put attributes *)
       
@@ -266,11 +280,14 @@ struct
       (("Action", "BatchPutAttributes") 
        :: ("DomainName", domain)
        :: attrs') in 
-    try_lwt 
-      lwt header, body = HC.post ~body:(`String (Util.encode_post_url params)) url in
-      
-      return `Ok
-    with HC.Http_error (code, _, body) ->  return (error_msg code body)
+    HC.try_bind
+      (fun () -> 
+        HC.post ~body:(`String (Util.encode_post_url params)) url)
+      (fun (header,body) -> HC.return `Ok)
+      (function 
+        | HC.Http_error (code, _, body) ->  
+            HC.return (error_msg code body)
+        | e -> raise e)
     
   (* get attributes *)
 
@@ -287,12 +304,15 @@ struct
         ("ItemName", b64enc_if encoded item) ::
         attribute_name_p
     ) in
-    try_lwt 
-      lwt header, body = HC.post ~body:(`String (Util.encode_post_url params)) url in
-      
-      let xml = X.xml_of_string body in
-      return (`Ok (get_attributes_response_of_xml encoded xml))
-    with HC.Http_error (code, _, body) ->  return (error_msg code body)
+    HC.try_bind
+      (fun () ->
+         HC.post ~body:(`String (Util.encode_post_url params)) url)
+      (fun (header,body) ->
+         let xml = X.xml_of_string body in
+         HC.return (`Ok (get_attributes_response_of_xml encoded xml)))
+      (function 
+        | HC.Http_error (code, _, body) -> HC.return (error_msg code body)
+        | e -> raise e)
  
   (* delete attributes *)
 
@@ -308,11 +328,14 @@ struct
        :: ("DomainName", domain)
        :: ("ItemName", b64enc_if encode item)
        :: attrs') in 
-    try_lwt 
-       lwt header, body = HC.post ~body:(`String (Util.encode_post_url params)) url in
-       return `Ok
-    with HC.Http_error (code, _, body) ->
-      return (error_msg code body)
+    HC.try_bind
+      (fun () -> 
+         HC.post ~body:(`String (Util.encode_post_url params)) url)
+      (fun (header,body) -> HC.return `Ok)
+      (function 
+        | HC.Http_error (code, _, body) ->
+            HC.return (error_msg code body)
+        | e -> raise e)
  
   (* select: TODO if [encode=true], encode references to values in the
      select [expression].  This might not be easy, as the [expression]
@@ -329,13 +352,16 @@ struct
        :: (match token with 
          | None -> []
          | Some t -> [ "NextToken", t ])) in 
-    try_lwt 
-       let key_equals_value = Util.encode_key_equals_value ~safe:true params in
-       let uri_query_component = String.concat "&" key_equals_value in
-       lwt header, body = HC.post ~body:(`String uri_query_component) url in
-       
-       let xml = X.xml_of_string body in
-       return (`Ok (select_of_xml encoded xml))
-    with HC.Http_error (code, _, body) -> return (error_msg code body)
- 
+    HC.try_bind
+      (fun () ->
+         let key_equals_value = Util.encode_key_equals_value ~safe:true params in
+         let uri_query_component = String.concat "&" key_equals_value in
+         HC.post ~body:(`String uri_query_component) url)
+      (fun (header,body) ->
+         let xml = X.xml_of_string body in
+         HC.return (`Ok (select_of_xml encoded xml)))
+      (function 
+        | HC.Http_error (code, _, body) -> 
+            HC.return (error_msg code body)
+        | e -> raise e)
 end

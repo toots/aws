@@ -8,11 +8,11 @@ module P = CalendarLib.Printer.CalendarPrinter
 module X = Xml
 
 
-open Lwt
+open HC
 open Creds
 open Http_method
 
-module Util = Aws_util
+module Util = Aws_util.Aws_utils(HC)
 
 exception Error of string
 
@@ -133,9 +133,10 @@ let describe_regions_response_of_xml = function
 let describe_regions ?expires_minutes creds =
   let request = signed_request creds ?expires_minutes
     ["Action", "DescribeRegions" ] in
-  lwt header, body = HC.get request in
-  let xml = X.xml_of_string body in  
-  return (describe_regions_response_of_xml xml)
+  bind (get request)
+  (fun (header,body) ->
+    let xml = X.xml_of_string body in  
+    return (describe_regions_response_of_xml xml))
 
 (* describe spot price history *)
 let item_of_xml = function 
@@ -237,9 +238,10 @@ let describe_spot_price_history ?expires_minutes ?region ?instance_type creds  =
   let request = signed_request creds ?region ?expires_minutes
     (("Action", "DescribeSpotPriceHistory") :: args)
   in
-  lwt header, body = HC.get request in
-  let xml = X.xml_of_string body in
-  return (describe_spot_price_history_of_xml xml)
+  bind (get request)
+  (fun (header,body) ->
+    let xml = X.xml_of_string body in
+    return (describe_spot_price_history_of_xml xml))
 
 (* terminate instances *)
 
@@ -331,13 +333,15 @@ let terminate_instances ?expires_minutes ?region creds instance_ids =
   let request = signed_request creds ?region ?expires_minutes
     (("Action", "TerminateInstances") :: args) 
   in
-  try_lwt
-    lwt header, body = HC.get request in
-    let xml = X.xml_of_string body in
-    return (`Ok  (terminate_instances_of_xml xml))
-  with 
-    | HC.Http_error (_,_,body) ->
-      return (error_msg body)
+  try_bind
+    (fun () -> get request)
+    (fun (header,body) ->
+      let xml = X.xml_of_string body in
+      return (`Ok  (terminate_instances_of_xml xml)))
+    (function
+      | Http_error (_,_,body) ->
+          return (error_msg body)
+      | e -> raise e)
 
 (* describe instances *)
 type instance = <
@@ -504,13 +508,16 @@ let describe_instances ?expires_minutes ?region creds instance_ids =
   let request = signed_request creds ?expires_minutes ?region
     (("Action", "DescribeInstances") :: args)
   in
-  try_lwt 
-    lwt header, body = HC.get request in
-    let xml = X.xml_of_string body in
-    return (`Ok (describe_instances_of_xml xml))
-  with
-    | HC.Http_error (_,_,body) ->
-      return (error_msg body)
+  try_bind
+    (fun () ->
+       get request)
+    (fun (header,body) ->
+      let xml = X.xml_of_string body in
+      return (`Ok (describe_instances_of_xml xml)))
+    (function
+      | Http_error (_,_,body) ->
+          return (error_msg body)
+      | e -> raise e)
 
 (* run instances *)
 let run_instances_of_xml = function
@@ -550,13 +557,16 @@ let run_instances
   let args = augment_opt (fun it -> "InstanceType", string_of_instance_type it) 
     args instance_type in
   let request = signed_request creds ?expires_minutes ?region args in
-  try_lwt 
-    lwt header, body = HC.get request in
-    let xml = X.xml_of_string body in
-    return (`Ok (run_instances_of_xml xml))
-  with
-    | HC.Http_error (_,_,body) ->
-      return (error_msg body)
+  try_bind
+    (fun () -> 
+      get request)
+    (fun (header,body) ->
+      let xml = X.xml_of_string body in
+      return (`Ok (run_instances_of_xml xml)))
+    (function
+      | Http_error (_,_,body) ->
+          return (error_msg body)
+      | e -> raise e)
 
 (* request spot instances *)
 type spot_instance_request_type = [`OneTime | `Persistent]
@@ -718,14 +728,17 @@ let request_spot_instances ?region creds spot_instance_request =
   let request = signed_request creds ?region 
     (("Action", "RequestSpotInstances") :: args)
   in
-  try_lwt 
-    lwt header, body = HC.get request in
-    let xml = X.xml_of_string body in
-    let rsp = request_spot_instances_of_xml xml in
-    return (`Ok rsp)
-  with
-    | HC.Http_error (_,_,body) ->
-      return (error_msg body)
+  try_bind
+    (fun () ->
+       get request)
+    (fun (header,body) ->
+       let xml = X.xml_of_string body in
+       let rsp = request_spot_instances_of_xml xml in
+       return (`Ok rsp))
+    (function
+      | Http_error (_,_,body) ->
+          return (error_msg body)
+      | e -> raise e)
   
 (* describe spot instance requests *)
 let describe_spot_instance_requests_of_xml = function 
@@ -748,13 +761,16 @@ let describe_spot_instance_requests ?region creds sir_ids =
   let sir_ids_args = sir_args_of_ids sir_ids in
   let request = signed_request creds ?region 
     (("Action", "DescribeSpotInstanceRequests") :: sir_ids_args) in
-  try_lwt
-    lwt header, body = HC.get request in
-    let xml = X.xml_of_string body in
-    return (`Ok (describe_spot_instance_requests_of_xml xml))
-  with 
-    | HC.Http_error (_,_,body) ->
-      return (error_msg body)
+  try_bind
+    (fun () ->
+      get request)
+    (fun (header,body) ->
+      let xml = X.xml_of_string body in
+      return (`Ok (describe_spot_instance_requests_of_xml xml)))
+    (function
+        | Http_error (_,_,body) ->
+            return (error_msg body)
+        | e -> raise e)
 
 (* cancel spot instance requests *)
 let item_of_xml = function
@@ -776,11 +792,14 @@ let cancel_spot_instance_requests ?region creds sir_ids =
   let sir_ids_args = sir_args_of_ids sir_ids in
   let args = ("Action","CancelSpotInstanceRequests") :: sir_ids_args in
   let request = signed_request ?region creds args in
-  try_lwt
-    lwt header, body = HC.get request in
-    let xml = X.xml_of_string body in
-    return (`Ok (cancel_spot_instance_requests_of_xml xml))
-  with 
-    | HC.Http_error (_,_,body) -> return (error_msg body)
+  try_bind
+    (fun () ->
+       get request)
+    (fun (header,body) ->
+       let xml = X.xml_of_string body in
+       return (`Ok (cancel_spot_instance_requests_of_xml xml)))
+    (function
+        | Http_error (_,_,body) -> return (error_msg body)
+        | e -> raise e)
 
 end

@@ -9,11 +9,11 @@ struct
 
 
 
-  open Lwt
+  open HC
   open Creds
   open Http_method
 
-  module Util = Aws_util
+  module Util = Aws_util.Aws_utils(HC)
 
 
   exception Error of string
@@ -159,15 +159,18 @@ let signed_request
         "QueueName", queue_name ; 
         "DefaultVisibilityTimeout", string_of_int default_visibility_timeout ;
       ] in 
-    try_lwt 
-  let ps = Util.encode_post_url params in
-  print "posting request on %s: %s\n" url ps ; 
-  lwt header, body = HC.post ~body:(`String ps) url in 
-  
-  
-  let xml = X.xml_of_string body in
-  return (`Ok (create_queue_response_of_xml xml))
-  with HC.Http_error (code, _, body) -> print "Error %d %s\n" code body ; return (error_msg body)
+  try_bind
+    (fun () -> 
+      let ps = Util.encode_post_url params in
+      print "posting request on %s: %s\n" url ps ; 
+      post ~body:(`String ps) url)
+    (fun (header,body) ->
+      let xml = X.xml_of_string body in
+      return (`Ok (create_queue_response_of_xml xml)))
+    (function
+       | Http_error (code, _, body) -> 
+           print "Error %d %s\n" code body ; return (error_msg body)
+       | e -> raise e)
 
 (* list existing queues *)
   let list_queues ?prefix creds = 
@@ -177,13 +180,17 @@ let signed_request
        :: (match prefix with 
            None -> [] 
          | Some prefix -> [ "QueueNamePrefix", prefix ])) in
-    try_lwt 
-  let ps = Util.encode_post_url params in 
-  lwt header, body = HC.post ~body:(`String ps) url in 
-  
-  let xml = X.xml_of_string body in
-  return (`Ok (list_queues_response_of_xml xml))
-    with HC.Http_error (code, _, body) -> print "Error %d %s\n" code body ; return (error_msg body)
+  try_bind
+    (fun () -> 
+      let ps = Util.encode_post_url params in 
+      post ~body:(`String ps) url)
+    (fun (header,body) ->
+      let xml = X.xml_of_string body in
+      return (`Ok (list_queues_response_of_xml xml)))
+    (function 
+       | Http_error (code, _, body) -> 
+           print "Error %d %s\n" code body ; return (error_msg body)
+       | e -> raise e)
       
 (* get messages from a queue *)
   let receive_message ?(attribute_name="All") ?(max_number_of_messages=1) ?(visibility_timeout=30) ?(encoded=true) creds queue_url = 
@@ -194,12 +201,15 @@ let signed_request
         "MaxNumberOfMessages", string_of_int max_number_of_messages ; 
         "VisibilityTimeout", string_of_int visibility_timeout ;
       ] in 
-    try_lwt 
-  lwt header, body = HC.post ~body:(`String (Util.encode_post_url params)) url in
-  
-  let xml = X.xml_of_string body in
-  return (`Ok (receive_message_response_of_xml ~encoded xml))
-  with HC.Http_error (_, _, body) -> return (error_msg body)
+  try_bind
+    (fun () ->
+       post ~body:(`String (Util.encode_post_url params)) url)
+    (fun (header,body) ->
+       let xml = X.xml_of_string body in
+       return (`Ok (receive_message_response_of_xml ~encoded xml)))
+    (function 
+      | Http_error (_, _, body) -> return (error_msg body)
+      | e -> raise e)
 
 (* delete a message from a queue *)
 
@@ -209,12 +219,14 @@ let signed_request
         "Action", "DeleteMessage" ;
         "ReceiptHandle", receipt_handle 
       ] in
-    try_lwt 
-  lwt header, body = HC.post ~body:(`String (Util.encode_post_url params)) url in
-  ignore (header) ;
-  ignore (body); 
-  return (`Ok ())
-    with HC.Http_error (_, _, body) -> return (error_msg body)
+  try_bind
+    (fun () ->
+      post ~body:(`String (Util.encode_post_url params)) url)
+    (fun (header,body) ->
+      return (`Ok ()))
+    (function
+       | Http_error (_, _, body) -> return (error_msg body)
+       | e -> raise e)
 
 (* send a message to a queue *)
 
@@ -224,10 +236,13 @@ let signed_request
         "Action", "SendMessage" ; 
         "MessageBody", (if encoded then Util.base64 body else body)  
       ] in 
-    try_lwt 
-  lwt header, body = HC.post ~body:(`String (Util.encode_post_url params)) url in
-  
-  let xml = X.xml_of_string body in
-  return (`Ok (send_message_response_of_xml xml))
-  with HC.Http_error (_, _, body) ->  return (error_msg body)
+  try_bind
+    (fun () ->
+       post ~body:(`String (Util.encode_post_url params)) url)
+    (fun (header,body) ->
+       let xml = X.xml_of_string body in
+       return (`Ok (send_message_response_of_xml xml)))
+    (function 
+       | Http_error (_, _, body) ->  return (error_msg body)
+       | e -> raise e)
 end
